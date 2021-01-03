@@ -458,6 +458,19 @@ impl<'a> SectionOccupiedEntry<'a> {
         self.inner.append(prop);
     }
 
+    /// Update existing section or append new section based on result in update_func
+    pub fn append_or_update<F>(&mut self, prop: Properties, mut update_func : F) 
+        where F: FnMut(&mut Properties) -> bool
+        {
+        let mut is_updated = false;
+        for inner_props in self.inner.iter_mut() {
+            is_updated = update_func(inner_props);
+        }
+        if !is_updated {
+            self.inner.append(prop);
+        }
+    }
+
     fn last_mut(&'a mut self) -> &'a mut Properties {
         self.inner
             .iter_mut()
@@ -1743,6 +1756,86 @@ bar = f
         assert_eq!(Some("f"), p3.get("bar"));
 
         assert_eq!(None, iter.next());
+    }
+
+    #[test]
+    fn append_duplicate_sections() {
+        let input = r"
+[Peer]
+foo = a
+bar = b
+
+[Peer]
+foo = c
+bar = d
+";
+
+        let mut ini = Ini::load_from_str(input).unwrap();
+        assert_eq!(2, ini.section_all(Some("Peer")).count());
+        let mut props = Properties::new();
+        props.insert("foo", "e");
+        props.insert("bar", "f");
+        match ini.entry(Some("Peer".into())) {
+            SectionEntry::Occupied(mut occ) => {
+                occ.append(props);                
+            },
+            _ => ()
+        }
+        assert_eq!(3, ini.section_all(Some("Peer")).count());
+        let mut iter = ini.iter();
+        let (k1, p1) = iter.next().unwrap();
+        assert_eq!(Some("Peer"), k1);
+        assert_eq!(Some("a"), p1.get("foo"));
+        assert_eq!(Some("b"), p1.get("bar"));
+        let (k2, p2) = iter.next().unwrap();
+        assert_eq!(Some("Peer"), k2);
+        assert_eq!(Some("c"), p2.get("foo"));
+        assert_eq!(Some("d"), p2.get("bar"));
+        let (k3, p3) = iter.next().unwrap();
+        assert_eq!(Some("Peer"), k3);
+        assert_eq!(Some("e"), p3.get("foo"));
+        assert_eq!(Some("f"), p3.get("bar"));
+    }
+
+    #[test]
+    fn append_or_update_duplicate_sections() {
+        let input = r"
+[Peer]
+foo = a
+bar = b
+
+[Peer]
+foo = c
+bar = d
+";
+
+        let mut ini = Ini::load_from_str(input).unwrap();
+        assert_eq!(2, ini.section_all(Some("Peer")).count());
+        let mut props = Properties::new();
+        props.insert("foo", "c");
+        props.insert("bar", "x");
+        match ini.entry(Some("Peer".into())) {
+            SectionEntry::Occupied(mut occ) => {
+                occ.append_or_update(props.clone(), |current_prop| {
+                    if current_prop.contains_key("foo") && current_prop.get("foo").unwrap() == "c" {
+                        *current_prop = props.clone();
+                        return true;
+                    }
+                    return false;
+                });                
+            },
+            _ => ()
+        }
+        assert_eq!(2, ini.section_all(Some("Peer")).count());
+        let mut iter = ini.iter();
+        let (k1, p1) = iter.next().unwrap();
+        assert_eq!(Some("Peer"), k1);
+        assert_eq!(Some("a"), p1.get("foo"));
+        assert_eq!(Some("b"), p1.get("bar"));
+        let (k2, p2) = iter.next().unwrap();
+        assert_eq!(Some("Peer"), k2);
+        assert_eq!(Some("c"), p2.get("foo"));
+        assert_eq!(Some("x"), p2.get("bar"));
     }
 
     #[test]
